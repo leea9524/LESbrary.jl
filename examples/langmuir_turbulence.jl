@@ -5,9 +5,9 @@
 # [McWilliams, J. C. et al., "Langmuir Turbulence in the ocean," Journal of Fluid Mechanics (1997)](https://www.cambridge.org/core/journals/journal-of-fluid-mechanics/article/langmuir-turbulence-in-the-ocean/638FD0E368140E5972144348DB930A38).
 
 
-using Pkg
+#using Pkg
 
-Pkg.instantiate()
+#Pkg.instantiate()
 
 using Printf
 using JLD2
@@ -33,10 +33,11 @@ using LESbrary
 using Oceananigans.BuoyancyModels: g_Earth
 using Oceananigans.Fields: PressureField
 using Oceananigans.BuoyancyModels: BuoyancyTracer
-using Oceananigans.SurfaceWaves: UniformStokesDrift
+using Oceananigans.StokesDrift: UniformStokesDrift
 
-using LESbrary.TurbulenceStatistics: TurbulentKineticEnergy, ShearProduction, ViscousDissipation
-using LESbrary.TurbulenceStatistics: first_through_second_order, turbulent_kinetic_energy_budget
+using Oceanostics.Oceanostics: TurbulentKineticEnergy
+using Oceanostics.TurbulentKineticEnergyTerms: TurbulentKineticEnergy, ShearProduction_z
+using LESbrary.TurbulenceStatistics: ViscousDissipation, first_through_second_order, turbulent_kinetic_energy_budget
 
 "Returns a dictionary of command line arguments."
 function parse_command_line_arguments()
@@ -101,7 +102,7 @@ N² = 1.936e-5 # s⁻²
 initial_mixed_layer_depth = 33 # m
 
 inertial_period = 2π / f
-
+hours = 3600; hour = 3600; minutes = 60; minute = 60
 stop_time = args["stop-hours"] * hours
 snapshot_time_interval = 10minutes
 averages_time_interval = 24hours
@@ -151,15 +152,15 @@ b_sponge = Relaxation(rate = 1/hour,
 advection = eval(args["advection-scheme"])()
 
 model = IncompressibleModel(
-           architecture = GPU(),
-            timestepper = :RungeKutta3,
+           architecture = CPU(),
               advection = advection,
+            timestepper = :RungeKutta3,
                    grid = grid,
                 tracers = :b,
                buoyancy = BuoyancyTracer(),
                coriolis = FPlane(f=f),
                 closure = AnisotropicMinimumDissipation(),
-          surface_waves = UniformStokesDrift(∂z_uˢ=∂z_uˢ),
+           stokes_drift = UniformStokesDrift(∂z_uˢ=∂z_uˢ),
     boundary_conditions = (u=u_bcs, b=b_bcs),
                 forcing = (u=u_sponge, v=v_sponge, w=w_sponge, b=b_sponge),
 )
@@ -183,6 +184,33 @@ set!(model, u=uᵢ, w=wᵢ, b=bᵢ)
 #####
 
 wizard = TimeStepWizard(cfl=1.0, Δt=1.0, max_change=1.1, max_Δt=30.0)
+
+## Add 'FieldMaximum in Diagnostics'
+"""
+    FieldMaximum(mapping, field)
+
+An object for calculating the maximum of a `mapping` function applied
+element-wise to `field`.
+
+Examples
+=======
+```julia
+julia> model = IncompressibleModel(grid=RegularRectilinearGrid(size=(16, 16, 16), length=(1, 1, 1)));
+
+julia> max_abs_u = FieldMaximum(abs, model.velocities.u);
+
+julia> max_w² = FieldMaximum(x->x^2, model.velocities.w);
+```
+"""
+struct FieldMaximum{F, M}
+    mapping :: M
+      field :: F
+end
+
+(m::FieldMaximum)(args...) = maximum(m.mapping, m.field.data.parent)
+
+(m::FieldMaximum{<:NamedTuple})(args...) =
+    NamedTuple{propertynames(m.field)}(maximum(m.mapping, f.data.parent) for f in m.field)
 
 umax = FieldMaximum(abs, model.velocities.u)
 vmax = FieldMaximum(abs, model.velocities.v)
@@ -236,7 +264,7 @@ V = primitive_statistics[:v]
 # Turbulent kinetic energy budget terms
 
 e = TurbulentKineticEnergy(model, U=U, V=V)
-shear_production = ShearProduction(model, data=c_scratch.data, U=U, V=V)
+shear_production = ShearProduction_z(model, data=c_scratch.data, U=U, V=V)
 dissipation = ViscousDissipation(model, data=c_scratch.data)
 
 tke_budget_statistics = turbulent_kinetic_energy_budget(model, b=b, p=p, U=U, V=V, e=e,
