@@ -185,23 +185,7 @@ set!(model, u=uᵢ, w=wᵢ, b=bᵢ)
 
 wizard = TimeStepWizard(cfl=1.0, Δt=1.0, max_change=1.1, max_Δt=30.0)
 
-## Add 'FieldMaximum in Diagnostics'
-"""
-    FieldMaximum(mapping, field)
-
-An object for calculating the maximum of a `mapping` function applied
-element-wise to `field`.
-
-Examples
-=======
-```julia
-julia> model = IncompressibleModel(grid=RegularRectilinearGrid(size=(16, 16, 16), length=(1, 1, 1)));
-
-julia> max_abs_u = FieldMaximum(abs, model.velocities.u);
-
-julia> max_w² = FieldMaximum(x->x^2, model.velocities.w);
-```
-"""
+## Add 'FieldMaximum in Diagnostics from Oceananigans v0.51.0'
 struct FieldMaximum{F, M}
     mapping :: M
       field :: F
